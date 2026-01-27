@@ -66,3 +66,34 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+.playerReport {
+  margin-top: 10px;
+}
+
+.statRow {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.statCell {
+  min-width: 150px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 14px;
+  color: white;
+  font-weight: 500;
+}
+
+.headerCell {
+  background: #444 !important;
+  font-weight: bold;
+}
+
+.empty {
+  visibility: hidden;
+}
