@@ -2,8 +2,8 @@ import { useEffect, useState, useMemo } from "react";
 import "./App.css";
 import axios from "axios";
 
-const SHEET_ID = "1GVdoDjcDitcfeEic1GWVxtkGJF-ju85Up76TaZOro7I";
-const API_KEY = "AIzaSyBEkJ0DFFNASncVQ4Wzg84HZL45nGg1yYI";
+const SHEET_ID = import.meta.env.VITE_SHEET_ID;
+const API_KEY = import.meta.env.VITE_API_KEY;
 
 const getColorForRatio = (ratio) => {
   // Clamp ratio between 0 and 1
