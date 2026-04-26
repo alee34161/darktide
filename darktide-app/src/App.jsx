@@ -199,6 +199,7 @@ function App() {
 
                   {/* Damage Row */}
                   <CellRow maxValues={maxValues} useColors={true} items={[
+                    { key:"boss_damage", label:`Boss Damage: ${(data.stats.boss_damage||0).toLocaleString()}`, value:data.stats.boss_damage||0 },
                     { key:"elite_damage", label:`Elite Damage: ${(data.stats.elite_damage||0).toLocaleString()}`, value:data.stats.elite_damage||0 },
                     { key:"special_damage", label:`Special Damage: ${(data.stats.special_damage||0).toLocaleString()}`, value:data.stats.special_damage||0 },
                     { key:"trash_damage", label:`Trash Damage: ${(data.stats.trash_damage||0).toLocaleString()}`, value:data.stats.trash_damage||0 }
