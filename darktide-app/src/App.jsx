@@ -4,6 +4,8 @@ import axios from "axios";
 
 const SHEET_ID = import.meta.env.VITE_SHEET_ID;
 const API_KEY = import.meta.env.VITE_API_KEY;
+const [collapsedRuns, setCollapsedRuns] = useState({});
+
 
 const getColorForRatio = (ratio) => {
   ratio = Math.max(0, Math.min(1, ratio));
@@ -37,6 +39,10 @@ const getColorForRatio = (ratio) => {
     const t = (ratio - 0.9) / 0.1;
     return `rgb(${Math.round(100 - t * 50)}, ${Math.round(190 + t * 20)}, ${Math.round(20 + t * 10)})`;
   }
+};
+
+const toggleRun = (idx) => {
+  setCollapsedRuns(prev => ({ ...prev, [idx]: !prev[idx] }));
 };
 
 function App() {
@@ -190,12 +196,14 @@ function App() {
           // Find the original run data to get all players for proper max calculation
           const originalRun = runs.find(r => r.date === run.date);
           const maxValues = computeMaxValues(originalRun ? originalRun.players : run.players);
+          const isCollapsed = collapsedRuns[idx];
           
           return (
             <div key={idx} className="run">
-              <div className="date">{run.date}</div>
-
-              {Object.entries(run.players).map(([name, data]) => (
+              <div className="date" onClick={() => toggleRun(idx)} style={{ cursor: "pointer" , userSelect: "none"}}>
+                {isCollapsed ? "▶" : "▼"} {run.date}
+              </div>
+              {!isCollapsed && Object.entries(run.players).map(([name, data]) => (
                 <div key={name} className="report">
                   <div className="player-name">{name}</div>
 
