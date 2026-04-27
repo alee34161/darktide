@@ -32,10 +32,10 @@ const getColorForRatio = (ratio) => {
     // Muted green
     const t = (ratio - 0.7) / 0.2;
     return `rgb(${Math.round(140 - t * 40)}, ${Math.round(180 + t * 10)}, ${Math.round(t * 20)})`;
-  } else {
+} else {
     // Green
     const t = (ratio - 0.9) / 0.1;
-    return `rgb(${Math.round(100 - t * 50)}, ${Math.round(190 + t * 65)}, ${Math.round(20 + t * 10)})`;
+    return `rgb(${Math.round(100 - t * 50)}, ${Math.round(190 + t * 20)}, ${Math.round(20 + t * 10)})`;
   }
 };
 
