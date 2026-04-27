@@ -40,10 +40,6 @@ const getColorForRatio = (ratio) => {
   }
 };
 
-const toggleRun = (idx) => {
-  setCollapsedRuns(prev => ({ ...prev, [idx]: !prev[idx] }));
-};
-
 function App() {
   const [rows, setRows] = useState([]);
   const [selectedPlayer, setSelectedPlayer] = useState("COMBINED");
@@ -55,6 +51,10 @@ function App() {
   useEffect(() => {
     axios.get(url).then(res => setRows(res.data.values || []));
   }, []);
+
+  const toggleRun = (idx) => {
+    setCollapsedRuns(prev => ({ ...prev, [idx]: !prev[idx] }));
+  };
 
   const runs = useMemo(() => {
     const parsed = [];
