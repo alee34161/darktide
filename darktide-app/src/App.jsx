@@ -6,21 +6,36 @@ const SHEET_ID = import.meta.env.VITE_SHEET_ID;
 const API_KEY = import.meta.env.VITE_API_KEY;
 
 const getColorForRatio = (ratio) => {
-  // Clamp ratio between 0 and 1
   ratio = Math.max(0, Math.min(1, ratio));
-  
-  if (ratio < 0.5) {
-    // Dark Red to Medium Orange (0 to 0.5)
-    const r = Math.round(160 + (60 * ratio * 2));  // 160 to 220
-    const g = Math.round(0 + (140 * ratio * 2));   // 0 to 140
-    const b = Math.round(0 + (10 * ratio * 2));    // 0 to 10
-    return `rgb(${r},${g},${b})`;
+
+  if (ratio < 0.1) {
+    // Red
+    const t = ratio / 0.1;
+    return `rgb(200, ${Math.round(t * 20)}, 0)`;
+  } else if (ratio < 0.3) {
+    // Reddish-orange
+    const t = (ratio - 0.1) / 0.2;
+    return `rgb(220, ${Math.round(20 + t * 100)}, 0)`;
+  } else if (ratio < 0.4) {
+    // Orange
+    const t = (ratio - 0.3) / 0.1;
+    return `rgb(230, ${Math.round(120 + t * 45)}, 0)`;
+  } else if (ratio < 0.6) {
+    // Yellow
+    const t = (ratio - 0.4) / 0.2;
+    return `rgb(${Math.round(230 - t * 15)}, ${Math.round(165 + t * 40)}, 0)`;
+  } else if (ratio < 0.7) {
+    // Yellow-green / olive
+    const t = (ratio - 0.6) / 0.1;
+    return `rgb(${Math.round(215 - t * 75)}, ${Math.round(205 - t * 25)}, 0)`;
+  } else if (ratio < 0.9) {
+    // Muted green
+    const t = (ratio - 0.7) / 0.2;
+    return `rgb(${Math.round(140 - t * 40)}, ${Math.round(180 + t * 10)}, ${Math.round(t * 20)})`;
   } else {
-    // Medium Orange to Muted Green (0.5 to 1)
-    const r = Math.round(220 - (100 * (ratio - 0.5) * 2)); // 220 to 120
-    const g = Math.round(140 + (40 * (ratio - 0.5) * 2));  // 140 to 180
-    const b = Math.round(10 + (40 * (ratio - 0.5) * 2));   // 10 to 50
-    return `rgb(${r},${g},${b})`;
+    // Green
+    const t = (ratio - 0.9) / 0.1;
+    return `rgb(${Math.round(100 - t * 50)}, ${Math.round(190 + t * 65)}, ${Math.round(20 + t * 10)})`;
   }
 };
 

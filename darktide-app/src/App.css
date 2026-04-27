@@ -8,7 +8,7 @@ body, html {
 .page {
   min-height: 100vh;
   width: 100vw;
-  background: #1a1a1a;
+  background: #535151;
   display: flex;
   justify-content: center;
   align-items: flex-start;
