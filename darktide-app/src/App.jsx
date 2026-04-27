@@ -4,7 +4,6 @@ import axios from "axios";
 
 const SHEET_ID = import.meta.env.VITE_SHEET_ID;
 const API_KEY = import.meta.env.VITE_API_KEY;
-const [collapsedRuns, setCollapsedRuns] = useState({});
 
 
 const getColorForRatio = (ratio) => {
@@ -48,6 +47,8 @@ const toggleRun = (idx) => {
 function App() {
   const [rows, setRows] = useState([]);
   const [selectedPlayer, setSelectedPlayer] = useState("COMBINED");
+  const [collapsedRuns, setCollapsedRuns] = useState({});
+
 
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Individual?key=${API_KEY}`;
 
