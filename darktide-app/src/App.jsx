@@ -255,7 +255,7 @@ function App() {
                 </div>
                 <CellRow items={rec.loadout.map(l => ({ label: l }))} useColors={false} />
                 <CellRow useColors={false} items={[
-                  { label: `${rec.player}`, style: { backgroundColor: "#c2ad37", color: "gold" } },
+                  { label: `${rec.player}`, style: { backgroundColor: "#c2ad37" } },
                   { label: `${rec.value.toLocaleString()}`, style: { backgroundColor: "#0ec44b" } },
                   { label: `${rec.date}`, style: { backgroundColor: "#2b119e" } }
                 ]} />
