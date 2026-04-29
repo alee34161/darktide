@@ -215,7 +215,7 @@ function App() {
           <div
             key={i}
             className="cell"
-            style={{ backgroundColor }}
+            style={style}
           >
             {item.label}
           </div>
