@@ -65,6 +65,15 @@ body, html {
   transform: translateY(-2px);
 }
 
+.search-bar {
+  padding: 6px 12px;
+  background: #2a2a2a;
+  border: 1px solid #555;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 14px;
+}
+
 .run {
   background: #2a2a2a;
   border-radius: 10px;

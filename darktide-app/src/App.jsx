@@ -44,6 +44,7 @@ function App() {
   const [rows, setRows] = useState([]);
   const [selectedPlayer, setSelectedPlayer] = useState("COMBINED");
   const [collapsedRuns, setCollapsedRuns] = useState({});
+  const [loadoutSearch, setLoadoutSearch] = useState("");
 
 
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Individual?key=${API_KEY}`;
@@ -138,14 +139,26 @@ function App() {
     [runs]
   );
 
-  const filteredRuns = selectedPlayer === "COMBINED"
+  const filteredRuns = useMemo(() => {
+  const search = loadoutSearch.toLowerCase();
+  return (selectedPlayer === "COMBINED"
     ? runs
     : runs.map(run => ({
         ...run,
         players: run.players[selectedPlayer]
           ? { [selectedPlayer]: run.players[selectedPlayer] }
           : {}
-      })).filter(run => Object.keys(run.players).length);
+      })).filter(run => Object.keys(run.players).length)
+  ).map(run => ({
+    ...run,
+    players: Object.fromEntries(
+      Object.entries(run.players).filter(([, data]) =>
+        !search || data.loadout.some(item => item.toLowerCase().includes(search))
+      )
+    )
+  })).filter(run => Object.keys(run.players).length > 0);
+}, [runs, selectedPlayer, loadoutSearch]);
+
 
   const computeMaxValues = (players) => {
     const max = {};
@@ -191,6 +204,13 @@ function App() {
               <button key={p} onClick={() => setSelectedPlayer(p)}>{p}</button>
             ))}
           </div>
+          <input
+             type="text"
+             placeholder="Search loadout..."
+             value={loadoutSearch}
+             onChange={e => setLoadoutSearch(e.target.value)}
+             className="search-bar"
+          />
         </div>
 
         {filteredRuns.map((run, idx) => {
