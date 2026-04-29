@@ -265,7 +265,7 @@ function App() {
         )}
 
 
-        {filteredRuns.map((run, idx) => {
+        {!showRecords && filteredRuns.map((run, idx) => {
           // Find the original run data to get all players for proper max calculation
           const originalRun = runs.find(r => r.date === run.date);
           const maxValues = computeMaxValues(originalRun ? originalRun.players : run.players);
