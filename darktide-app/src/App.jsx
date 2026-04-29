@@ -208,7 +208,9 @@ function App() {
           const ratio = item.value / maxValues[item.key];
           backgroundColor = getColorForRatio(ratio);
         }
-        
+
+        const style = { backgroundColor, ...(item.style || {}) };
+
         return (
           <div
             key={i}
@@ -228,9 +230,9 @@ function App() {
         <div className="header">
           <h1>Darktide Stats</h1>
           <div className="buttons">
-            <button onClick={() => setSelectedPlayer("COMBINED")}>Combined</button>
+            <button onClick={() => {setSelectedPlayer("COMBINED"); setShowRecords(false);}}>Combined</button>
             {allPlayers.map(p => (
-              <button key={p} onClick={() => setSelectedPlayer(p)}>{p}</button>
+              <button key={p} onClick={() => {setSelectedPlayer(p); setShowRecords(false);}}>{p}</button>
             ))}
             <button onClick={() => setShowRecords(p => !p)}>Records</button>
           </div>
@@ -253,9 +255,9 @@ function App() {
                 </div>
                 <CellRow items={rec.loadout.map(l => ({ label: l }))} useColors={false} />
                 <CellRow useColors={false} items={[
-                  { label: `Player: ${rec.player}` },
-                  { label: `Date: ${rec.date}` },
-                  { label: `Record: ${rec.value.toLocaleString()}` }
+                  { label: `${rec.player}`, style: { backgroundColor: "#c2ad37", color: "gold" } },
+                  { label: `${rec.value.toLocaleString()}`, style: { backgroundColor: "#0ec44b" } },
+                  { label: `${rec.date}`, style: { backgroundColor: "#2b119e" } }
                 ]} />
              </div>
            ))}
