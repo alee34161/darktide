@@ -45,6 +45,7 @@ function App() {
   const [selectedPlayer, setSelectedPlayer] = useState("COMBINED");
   const [collapsedRuns, setCollapsedRuns] = useState({});
   const [loadoutSearch, setLoadoutSearch] = useState("");
+  const [showRecords, setShowRecords] = useState(false);
 
 
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Individual?key=${API_KEY}`;
@@ -139,6 +140,34 @@ function App() {
     [runs]
   );
 
+  const records = useMemo(() => {
+  const statKeys = [
+    "melee_elites", "ranged_elites", "melee_specials", "ranged_specials",
+    "horde_trash", "ranged_trash", "boss_damage", "elite_damage",
+    "special_damage", "trash_damage", "assists", "needed_help",
+    "ammo_taken_", "blitz_uses", "combat_ability_uses", "damage_taken"
+  ];
+
+  const records = {};
+  runs.forEach(run => {
+    Object.entries(run.players).forEach(([playerName, data]) => {
+      statKeys.forEach(key => {
+        const val = data.stats[key] || 0;
+        if (!records[key] || val > records[key].value) {
+          records[key] = {
+            value: val,
+            player: playerName,
+            date: run.date,
+            loadout: data.loadout
+          };
+        }
+      });
+    });
+  });
+  return records;
+}, [runs]);
+
+
   const filteredRuns = useMemo(() => {
   const search = loadoutSearch.toLowerCase();
   return (selectedPlayer === "COMBINED"
@@ -203,6 +232,7 @@ function App() {
             {allPlayers.map(p => (
               <button key={p} onClick={() => setSelectedPlayer(p)}>{p}</button>
             ))}
+            <button onClick={() => setShowRecords(p => !p)}>Records</button>
           </div>
           <input
              type="text"
@@ -212,6 +242,26 @@ function App() {
              className="search-bar"
           />
         </div>
+
+        {showRecords && (
+          <div className="run">
+           <div className="date">All-Time Records</div>
+            {Object.entries(records).map(([key, rec]) => (
+             <div key={key} className="report">
+                <div className="player-name">
+                  {key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
+                </div>
+                <CellRow items={rec.loadout.map(l => ({ label: l }))} useColors={false} />
+                <CellRow useColors={false} items={[
+                  { label: `Player: ${rec.player}` },
+                  { label: `Date: ${rec.date}` },
+                  { label: `Record: ${rec.value.toLocaleString()}` }
+                ]} />
+             </div>
+           ))}
+          </div>
+        )}
+
 
         {filteredRuns.map((run, idx) => {
           // Find the original run data to get all players for proper max calculation
