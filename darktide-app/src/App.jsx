@@ -5,11 +5,13 @@ import axios from "axios";
 const SHEET_ID = import.meta.env.VITE_SHEET_ID;
 const API_KEY  = import.meta.env.VITE_API_KEY;
 
-// The four permanent players. Anyone whose name is NOT in this list is
-// treated as a "Random" and grouped under a single Randoms tab/filter
-// rather than creating an ever-growing list of one-off player buttons.
+// The four permanent players. Matching is case-insensitive because the
+// Apps Script writes names as uppercase (👤 STEVEN) in the Individual sheet.
 const KNOWN_PLAYERS = ['Steven', 'Lee', 'Injea', 'Blitter'];
-const isRandom = (name) => !KNOWN_PLAYERS.includes(name);
+const isKnown  = (name) => KNOWN_PLAYERS.some(k => k.toLowerCase() === name.toLowerCase());
+const isRandom = (name) => !isKnown(name);
+// Canonical display name for a known player (preserves original casing)
+const canonicalName = (name) => KNOWN_PLAYERS.find(k => k.toLowerCase() === name.toLowerCase()) || name;
 
 
 const getColorForRatio = (ratio) => {
@@ -141,12 +143,12 @@ function App() {
     return parsed;
   }, [rows]);
 
-  // Only expose buttons for the four known players (in a fixed order) plus a
-  // single "Randoms" button if any run contains at least one unknown player.
-  // This prevents an ever-growing tab list when many different randoms appear.
   const allPlayers = useMemo(() => {
     const presentNames = new Set(runs.flatMap(r => Object.keys(r.players)));
-    const known = KNOWN_PLAYERS.filter(p => presentNames.has(p));
+    // Only include a known player button if at least one run has them (case-insensitive)
+    const known = KNOWN_PLAYERS.filter(p =>
+      [...presentNames].some(n => n.toLowerCase() === p.toLowerCase())
+    );
     const hasAnyRandom = [...presentNames].some(isRandom);
     return hasAnyRandom ? [...known, 'Randoms'] : known;
   }, [runs]);
@@ -187,7 +189,6 @@ function App() {
       // Show all runs with all their players
       baseRuns = runs;
     } else if (selectedPlayer === "Randoms") {
-      // Only runs that contain at least one random; show only the randoms in each
       baseRuns = runs
         .map(run => ({
           ...run,
@@ -197,14 +198,18 @@ function App() {
         }))
         .filter(run => Object.keys(run.players).length > 0);
     } else {
-      // A specific known player — only runs they were in, showing only them
+      // A specific known player — match case-insensitively since the sheet
+      // stores names uppercase but buttons display them in canonical casing
       baseRuns = runs
-        .map(run => ({
-          ...run,
-          players: run.players[selectedPlayer]
-            ? { [selectedPlayer]: run.players[selectedPlayer] }
-            : {}
-        }))
+        .map(run => {
+          const key = Object.keys(run.players).find(
+            k => k.toLowerCase() === selectedPlayer.toLowerCase()
+          );
+          return {
+            ...run,
+            players: key ? { [selectedPlayer]: run.players[key] } : {}
+          };
+        })
         .filter(run => Object.keys(run.players).length > 0);
     }
 
