@@ -62,8 +62,8 @@ function App() {
     axios.get(url).then(res => setRows(res.data.values || []));
   }, []);
 
-  const toggleRun = (idx) => {
-    setCollapsedRuns(prev => ({ ...prev, [idx]: !prev[idx] }));
+  const toggleRun = (runKey) => {
+    setCollapsedRuns(prev => ({ ...prev, [runKey]: !prev[runKey] }));
   };
 
   const runs = useMemo(() => {
@@ -305,14 +305,13 @@ function App() {
 
 
         {!showRecords && filteredRuns.map((run, idx) => {
-          // Find the original run data to get all players for proper max calculation
           const originalRun = runs.find(r => r.date === run.date);
           const maxValues = computeMaxValues(originalRun ? originalRun.players : run.players);
-          const isCollapsed = collapsedRuns[idx];
-          
+          const isCollapsed = collapsedRuns[run.date];
+
           return (
             <div key={idx} className="run">
-              <div className="date" onClick={() => toggleRun(idx)} style={{ cursor: "pointer" , userSelect: "none"}}>
+              <div className="date" onClick={() => toggleRun(run.date)} style={{ cursor: "pointer", userSelect: "none"}}>
                 {isCollapsed ? "▶" : "▼"} {run.date}
               </div>
               {!isCollapsed && Object.entries(run.players).map(([name, data]) => (
