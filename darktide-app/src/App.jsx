@@ -3,7 +3,13 @@ import "./App.css";
 import axios from "axios";
 
 const SHEET_ID = import.meta.env.VITE_SHEET_ID;
-const API_KEY = import.meta.env.VITE_API_KEY;
+const API_KEY  = import.meta.env.VITE_API_KEY;
+
+// The four permanent players. Anyone whose name is NOT in this list is
+// treated as a "Random" and grouped under a single Randoms tab/filter
+// rather than creating an ever-growing list of one-off player buttons.
+const KNOWN_PLAYERS = ['Steven', 'Lee', 'Injea', 'Blitter'];
+const isRandom = (name) => !KNOWN_PLAYERS.includes(name);
 
 
 const getColorForRatio = (ratio) => {
@@ -135,10 +141,15 @@ function App() {
     return parsed;
   }, [rows]);
 
-  const allPlayers = useMemo(
-    () => Array.from(new Set(runs.flatMap(r => Object.keys(r.players)))),
-    [runs]
-  );
+  // Only expose buttons for the four known players (in a fixed order) plus a
+  // single "Randoms" button if any run contains at least one unknown player.
+  // This prevents an ever-growing tab list when many different randoms appear.
+  const allPlayers = useMemo(() => {
+    const presentNames = new Set(runs.flatMap(r => Object.keys(r.players)));
+    const known = KNOWN_PLAYERS.filter(p => presentNames.has(p));
+    const hasAnyRandom = [...presentNames].some(isRandom);
+    return hasAnyRandom ? [...known, 'Randoms'] : known;
+  }, [runs]);
 
   const records = useMemo(() => {
   const statKeys = [
@@ -169,24 +180,47 @@ function App() {
 
 
   const filteredRuns = useMemo(() => {
-  const search = loadoutSearch.toLowerCase();
-  return (selectedPlayer === "COMBINED"
-    ? runs
-    : runs.map(run => ({
+    const search = loadoutSearch.toLowerCase();
+
+    let baseRuns;
+    if (selectedPlayer === "COMBINED") {
+      // Show all runs with all their players
+      baseRuns = runs;
+    } else if (selectedPlayer === "Randoms") {
+      // Only runs that contain at least one random; show only the randoms in each
+      baseRuns = runs
+        .map(run => ({
+          ...run,
+          players: Object.fromEntries(
+            Object.entries(run.players).filter(([name]) => isRandom(name))
+          )
+        }))
+        .filter(run => Object.keys(run.players).length > 0);
+    } else {
+      // A specific known player — only runs they were in, showing only them
+      baseRuns = runs
+        .map(run => ({
+          ...run,
+          players: run.players[selectedPlayer]
+            ? { [selectedPlayer]: run.players[selectedPlayer] }
+            : {}
+        }))
+        .filter(run => Object.keys(run.players).length > 0);
+    }
+
+    // Apply loadout search across whichever players are visible in each run
+    if (!search) return baseRuns;
+    return baseRuns
+      .map(run => ({
         ...run,
-        players: run.players[selectedPlayer]
-          ? { [selectedPlayer]: run.players[selectedPlayer] }
-          : {}
-      })).filter(run => Object.keys(run.players).length)
-  ).map(run => ({
-    ...run,
-    players: Object.fromEntries(
-      Object.entries(run.players).filter(([, data]) =>
-        !search || data.loadout.some(item => item.toLowerCase().includes(search))
-      )
-    )
-  })).filter(run => Object.keys(run.players).length > 0);
-}, [runs, selectedPlayer, loadoutSearch]);
+        players: Object.fromEntries(
+          Object.entries(run.players).filter(([, data]) =>
+            data.loadout.some(item => item.toLowerCase().includes(search))
+          )
+        )
+      }))
+      .filter(run => Object.keys(run.players).length > 0);
+  }, [runs, selectedPlayer, loadoutSearch]);
 
 
   const computeMaxValues = (players) => {
