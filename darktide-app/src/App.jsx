@@ -5,44 +5,36 @@ import axios from "axios";
 const SHEET_ID = import.meta.env.VITE_SHEET_ID;
 const API_KEY  = import.meta.env.VITE_API_KEY;
 
-// The four permanent players. Matching is case-insensitive because the
-// Apps Script writes names as uppercase (👤 STEVEN) in the Individual sheet.
+// The four permanent players; anyone else is a random. Names are matched
+// case-insensitively because the sheet writes them in uppercase.
 const KNOWN_PLAYERS = ['Steven', 'Lee', 'Injea', 'Blitter'];
 const isKnown  = (name) => KNOWN_PLAYERS.some(k => k.toLowerCase() === name.toLowerCase());
 const isRandom = (name) => !isKnown(name);
-// Canonical display name for a known player (preserves original casing)
-const canonicalName = (name) => KNOWN_PLAYERS.find(k => k.toLowerCase() === name.toLowerCase()) || name;
 
 
+// Red-to-green colour for a stat's share of the run's best value.
 const getColorForRatio = (ratio) => {
   ratio = Math.max(0, Math.min(1, ratio));
 
   if (ratio < 0.1) {
-    // Red
     const t = ratio / 0.1;
     return `rgb(200, ${Math.round(t * 20)}, 0)`;
   } else if (ratio < 0.3) {
-    // Reddish-orange
     const t = (ratio - 0.1) / 0.2;
     return `rgb(220, ${Math.round(20 + t * 100)}, 0)`;
   } else if (ratio < 0.4) {
-    // Orange
     const t = (ratio - 0.3) / 0.1;
     return `rgb(230, ${Math.round(120 + t * 45)}, 0)`;
   } else if (ratio < 0.6) {
-    // Yellow
     const t = (ratio - 0.4) / 0.2;
     return `rgb(${Math.round(230 - t * 15)}, ${Math.round(165 + t * 40)}, 0)`;
   } else if (ratio < 0.7) {
-    // Yellow-green / olive
     const t = (ratio - 0.6) / 0.1;
     return `rgb(${Math.round(215 - t * 75)}, ${Math.round(205 - t * 25)}, 0)`;
   } else if (ratio < 0.9) {
-    // Muted green
     const t = (ratio - 0.7) / 0.2;
     return `rgb(${Math.round(140 - t * 40)}, ${Math.round(180 + t * 10)}, ${Math.round(t * 20)})`;
 } else {
-    // Green
     const t = (ratio - 0.9) / 0.1;
     return `rgb(${Math.round(100 - t * 50)}, ${Math.round(190 + t * 20)}, ${Math.round(20 + t * 10)})`;
   }
@@ -54,24 +46,27 @@ function App() {
   const [collapsedRuns, setCollapsedRuns] = useState({});
   const [loadoutSearch, setLoadoutSearch] = useState("");
   const [showRecords, setShowRecords] = useState(false);
+  const [loadState, setLoadState] = useState("loading");
 
 
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Individual?key=${API_KEY}`;
 
   useEffect(() => {
-    axios.get(url).then(res => setRows(res.data.values || []));
-  }, []);
+    axios.get(url)
+      .then(res => { setRows(res.data.values || []); setLoadState("ok"); })
+      .catch(err => { console.error("Failed to load the Individual sheet:", err); setLoadState("error"); });
+  }, [url]);
 
   const toggleRun = (runKey) => {
     setCollapsedRuns(prev => ({ ...prev, [runKey]: !prev[runKey] }));
   };
 
+  // Parse the Individual sheet's rows into runs, players, loadouts and stats.
   const runs = useMemo(() => {
     const parsed = [];
     let currentRun = null;
     let currentPlayer = null;
-
-    console.log("Raw rows data:", rows.slice(0, 30)); // Log first 30 rows
+    let expectLoadout = false;
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -79,25 +74,19 @@ function App() {
 
       const firstCell = (row[0] || "").trim();
       
-      // Check for date marker
       if (firstCell.startsWith("▶")) {
         currentRun = { date: firstCell.replace("▶", "").trim(), players: {}, havoc: null };
-        currentPlayer = null; // don't let a new run's rows attach to the previous run's last player
+        currentPlayer = null;
+        expectLoadout = false;
         parsed.push(currentRun);
-        console.log(`Found run: ${currentRun.date}`);
         continue;
       }
 
-      // Check for player marker
-      // Havoc line written by the Apps Script directly under the run header
-      // Accepts the old "🔥 HAVOC RANK" form too, in case of an un-regenerated sheet
-      if (/^(🔥\s*)?HAVOC RANK/i.test(firstCell)) {
-        const rank = firstCell.replace(/^(🔥\s*)?HAVOC RANK\s*/i, "").trim();
-        // Ignore a Havoc line with no rank rather than showing an empty banner
+      if (/^HAVOC RANK/i.test(firstCell)) {
+        const rank = firstCell.replace(/^HAVOC RANK\s*/i, "").trim();
         if (currentRun && rank) {
           currentRun.havoc = {
             rank,
-            // "Mutators: ...  |  Modifiers: ..." -> one entry per line
             details: (row[1] || "").split("|").map(d => d.trim()).filter(Boolean),
           };
         }
@@ -108,7 +97,6 @@ function App() {
         currentPlayer = firstCell.replace("👤", "").trim();
         if (currentRun) {
           currentRun.players[currentPlayer] = { loadout: [], stats: {} };
-          console.log(`Found player: ${currentPlayer}`);
         }
         continue;
       }
@@ -116,52 +104,36 @@ function App() {
       if (!currentRun || !currentPlayer) continue;
 
       const playerData = currentRun.players[currentPlayer];
-      
-      // Skip header rows
       const rowText = row.join(" ").toLowerCase();
-      if (rowText.includes("class melee ranged") || 
-          rowText.includes("kills damage") || 
-          rowText.includes("additional stats")) {
+
+      if (rowText.startsWith("class melee ranged")) {
+        expectLoadout = true;
         continue;
       }
-
-      // Collect loadout items (should be exactly 7 items)
-      if (playerData.loadout.length < 7) {
-        // Add all non-empty cells from this row to loadout
-        for (let j = 0; j < row.length && playerData.loadout.length < 7; j++) {
-          const cell = (row[j] || "").trim();
-          if (cell && !cell.startsWith("▶") && !cell.startsWith("👤")) {
-            playerData.loadout.push(cell);
-            console.log(`Added loadout item: ${cell}`);
-          }
-        }
+      if (expectLoadout) {
+        playerData.loadout = Array.from({ length: 7 }, (_, k) => (row[k] || "").trim());
+        expectLoadout = false;
         continue;
       }
+      if (rowText.includes("kills damage") || rowText.includes("additional stats")) continue;
 
-      // Parse stats from remaining rows
-      console.log(`Checking row for stats:`, row);
       for (let j = 0; j < row.length - 1; j++) {
         const label = (row[j] || "").trim();
         const valueStr = (row[j + 1] || "").trim();
-        
-        // Check if current cell is a label and next cell is a number
-        if (label && valueStr && /^[\d,]+$/.test(valueStr)) {
+        if (label && /^[\d,]+$/.test(valueStr)) {
           const key = label.toLowerCase().replace(/\s+/g, "_").replace(/[()%]/g, "");
-          const value = parseInt(valueStr.replace(/,/g, ""), 10);
-          console.log(`Parsed stat: ${label} -> ${key} = ${value}`);
-          playerData.stats[key] = value;
-          j++; // Skip the next cell since we just processed it
+          playerData.stats[key] = parseInt(valueStr.replace(/,/g, ""), 10);
+          j++;
         }
       }
     }
 
-    console.log("Parsed runs:", parsed);
     return parsed;
   }, [rows]);
 
+  // Player buttons: the known players present, plus one Randoms button if needed.
   const allPlayers = useMemo(() => {
     const presentNames = new Set(runs.flatMap(r => Object.keys(r.players)));
-    // Only include a known player button if at least one run has them (case-insensitive)
     const known = KNOWN_PLAYERS.filter(p =>
       [...presentNames].some(n => n.toLowerCase() === p.toLowerCase())
     );
@@ -169,6 +141,7 @@ function App() {
     return hasAnyRandom ? [...known, 'Randoms'] : known;
   }, [runs]);
 
+  // All-time best value for each stat.
   const records = useMemo(() => {
   const statKeys = [
     "melee_elites", "ranged_elites", "melee_specials", "ranged_specials",
@@ -197,12 +170,12 @@ function App() {
 }, [runs]);
 
 
+  // Runs for the selected player view, narrowed by the loadout search.
   const filteredRuns = useMemo(() => {
     const search = loadoutSearch.toLowerCase();
 
     let baseRuns;
     if (selectedPlayer === "COMBINED") {
-      // Show all runs with all their players
       baseRuns = runs;
     } else if (selectedPlayer === "Randoms") {
       baseRuns = runs
@@ -214,8 +187,6 @@ function App() {
         }))
         .filter(run => Object.keys(run.players).length > 0);
     } else {
-      // A specific known player — match case-insensitively since the sheet
-      // stores names uppercase but buttons display them in canonical casing
       baseRuns = runs
         .map(run => {
           const key = Object.keys(run.players).find(
@@ -229,7 +200,6 @@ function App() {
         .filter(run => Object.keys(run.players).length > 0);
     }
 
-    // Apply loadout search across whichever players are visible in each run
     if (!search) return baseRuns;
     return baseRuns
       .map(run => ({
@@ -244,6 +214,7 @@ function App() {
   }, [runs, selectedPlayer, loadoutSearch]);
 
 
+  // Each stat's highest value in a run, for colour coding.
   const computeMaxValues = (players) => {
     const max = {};
     Object.values(players).forEach(p => {
@@ -254,6 +225,7 @@ function App() {
     return max;
   };
 
+  // A row of stat cells, optionally colour-coded.
   const CellRow = ({ items, maxValues, useColors = false }) => (
     <div className="row">
       {items.map((item, i) => {
@@ -300,6 +272,16 @@ function App() {
           />
         </div>
 
+        {loadState === "loading" && <div className="run"><div className="date">Loading reports…</div></div>}
+        {loadState === "error" && (
+          <div className="run"><div className="date">Couldn't load the reports. Try reloading the page.</div></div>
+        )}
+        {loadState === "ok" && runs.length === 0 && (
+          <div className="run">
+            <div className="date">No reports found. If a mission was just uploaded, the sheet may still be rebuilding — reload in a few seconds.</div>
+          </div>
+        )}
+
         {showRecords && (
           <div className="run">
            <div className="date">All-Time Records</div>
@@ -320,13 +302,13 @@ function App() {
         )}
 
 
-        {!showRecords && filteredRuns.map((run, idx) => {
+        {!showRecords && filteredRuns.map(run => {
           const originalRun = runs.find(r => r.date === run.date);
           const maxValues = computeMaxValues(originalRun ? originalRun.players : run.players);
           const isCollapsed = collapsedRuns[run.date];
 
           return (
-            <div key={idx} className="run">
+            <div key={run.date} className="run">
               <div className="date" onClick={() => toggleRun(run.date)} style={{ cursor: "pointer", userSelect: "none"}}>
                 {isCollapsed ? "▶" : "▼"} {run.date}
               </div>
@@ -347,10 +329,8 @@ function App() {
                 <div key={name} className="report">
                   <div className="player-name">{name}</div>
 
-                  {/* Loadout Row */}
                   <CellRow items={data.loadout.map(l => ({ label: l }))} useColors={false} />
 
-                  {/* Kills Row */}
                   <CellRow maxValues={maxValues} useColors={true} items={[
                     { key:"melee_elites", label:`Melee Elites: ${data.stats.melee_elites||0}`, value:data.stats.melee_elites||0 },
                     { key:"ranged_elites", label:`Ranged Elites: ${data.stats.ranged_elites||0}`, value:data.stats.ranged_elites||0 },
@@ -360,7 +340,6 @@ function App() {
                     { key:"ranged_trash", label:`Ranged Trash: ${data.stats.ranged_trash||0}`, value:data.stats.ranged_trash||0 }
                   ]} />
 
-                  {/* Damage Row */}
                   <CellRow maxValues={maxValues} useColors={true} items={[
                     { key:"boss_damage", label:`Boss Damage: ${(data.stats.boss_damage||0).toLocaleString()}`, value:data.stats.boss_damage||0 },
                     { key:"elite_damage", label:`Elite Damage: ${(data.stats.elite_damage||0).toLocaleString()}`, value:data.stats.elite_damage||0 },
@@ -368,14 +347,12 @@ function App() {
                     { key:"trash_damage", label:`Trash Damage: ${(data.stats.trash_damage||0).toLocaleString()}`, value:data.stats.trash_damage||0 }
                   ]} />
 
-                  {/* Support Row - No color coding */}
                   <CellRow items={[
                     { label:`Assists: ${data.stats.assists||0}` },
                     { label:`Needed Help: ${data.stats.needed_help||0}` },
                     { label:`Ammo Taken: ${data.stats.ammo_taken_||0}` }
                   ]} useColors={false} />
 
-                  {/* Abilities Row - No color coding */}
                   <CellRow items={[
                     { label:`Blitz Uses: ${data.stats.blitz_uses||0}` },
                     { label:`Combat Ability Uses: ${data.stats.combat_ability_uses||0}` },
