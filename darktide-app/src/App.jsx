@@ -81,13 +81,28 @@ function App() {
       
       // Check for date marker
       if (firstCell.startsWith("▶")) {
-        currentRun = { date: firstCell.replace("▶", "").trim(), players: {} };
+        currentRun = { date: firstCell.replace("▶", "").trim(), players: {}, havoc: null };
+        currentPlayer = null; // don't let a new run's rows attach to the previous run's last player
         parsed.push(currentRun);
         console.log(`Found run: ${currentRun.date}`);
         continue;
       }
 
       // Check for player marker
+      // Havoc line written by the Apps Script directly under the run header
+      if (firstCell.startsWith("🔥")) {
+        const rank = firstCell.replace(/^🔥\s*HAVOC RANK\s*/i, "").trim();
+        // Ignore a Havoc line with no rank rather than showing an empty banner
+        if (currentRun && rank) {
+          currentRun.havoc = {
+            rank,
+            // "Mutators: ...  |  Modifiers: ..." -> one entry per line
+            details: (row[1] || "").split("|").map(d => d.trim()).filter(Boolean),
+          };
+        }
+        continue;
+      }
+
       if (firstCell.startsWith("👤")) {
         currentPlayer = firstCell.replace("👤", "").trim();
         if (currentRun) {
@@ -314,6 +329,19 @@ function App() {
               <div className="date" onClick={() => toggleRun(run.date)} style={{ cursor: "pointer", userSelect: "none"}}>
                 {isCollapsed ? "▶" : "▼"} {run.date}
               </div>
+              {run.havoc?.rank && (
+                <div className="havoc" style={{
+                  backgroundColor: "#7f1d1d", color: "#fff", padding: "8px 12px",
+                  borderRadius: "6px", margin: "6px 0", textAlign: "center",
+                }}>
+                  <strong>🔥 Havoc Rank {run.havoc.rank}</strong>
+                  {run.havoc.details.map((line, i) => (
+                    <div key={i} style={{ fontSize: "0.85em", marginTop: "4px", opacity: 0.9 }}>
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              )}
               {!isCollapsed && Object.entries(run.players).map(([name, data]) => (
                 <div key={name} className="report">
                   <div className="player-name">{name}</div>
