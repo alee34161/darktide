@@ -90,8 +90,9 @@ function App() {
 
       // Check for player marker
       // Havoc line written by the Apps Script directly under the run header
-      if (firstCell.startsWith("🔥")) {
-        const rank = firstCell.replace(/^🔥\s*HAVOC RANK\s*/i, "").trim();
+      // Accepts the old "🔥 HAVOC RANK" form too, in case of an un-regenerated sheet
+      if (/^(🔥\s*)?HAVOC RANK/i.test(firstCell)) {
+        const rank = firstCell.replace(/^(🔥\s*)?HAVOC RANK\s*/i, "").trim();
         // Ignore a Havoc line with no rank rather than showing an empty banner
         if (currentRun && rank) {
           currentRun.havoc = {
@@ -334,7 +335,7 @@ function App() {
                   backgroundColor: "#7f1d1d", color: "#fff", padding: "8px 12px",
                   borderRadius: "6px", margin: "6px 0", textAlign: "center",
                 }}>
-                  <strong>🔥 Havoc Rank {run.havoc.rank}</strong>
+                  <strong>Havoc Rank {run.havoc.rank}</strong>
                   {run.havoc.details.map((line, i) => (
                     <div key={i} style={{ fontSize: "0.85em", marginTop: "4px", opacity: 0.9 }}>
                       {line}
