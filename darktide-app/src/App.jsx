@@ -11,6 +11,43 @@ const KNOWN_PLAYERS = ['Steven', 'Lee', 'Injea', 'Blitter'];
 const isKnown  = (name) => KNOWN_PLAYERS.some(k => k.toLowerCase() === name.toLowerCase());
 const isRandom = (name) => !isKnown(name);
 
+const PAGE_SIZE = 20;
+const EXPANDED_BY_DEFAULT = 3;
+
+const STAT_SECTIONS = [
+  { title: "Kills", coloured: true, rows: [
+    ["Melee Elites", "melee_elites"], ["Ranged Elites", "ranged_elites"],
+    ["Melee Specials", "melee_specials"], ["Ranged Specials", "ranged_specials"],
+    ["Melee Trash", "horde_trash"], ["Ranged Trash", "ranged_trash"],
+  ]},
+  { title: "Damage", coloured: true, rows: [
+    ["Boss Damage", "boss_damage"], ["Elite Damage", "elite_damage"],
+    ["Special Damage", "special_damage"], ["Trash Damage", "trash_damage"],
+  ]},
+  { title: "Support", coloured: false, rows: [
+    ["Assists", "assists"], ["Needed Help", "needed_help"], ["Ammo Taken", "ammo_taken_"],
+    ["Blitz Uses", "blitz_uses"], ["Combat Ability Uses", "combat_ability_uses"], ["Damage Taken", "damage_taken"],
+  ]},
+];
+
+const S = {
+  label: { fontSize: 12, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#9a9a9a" },
+  control: { height: 36, padding: "0 8px", border: "1px solid #4a4a4a", borderRadius: 6, background: "#2a2a2a", color: "#ececec", fontSize: 13 },
+  button: { minHeight: 36, padding: "0 14px", borderRadius: 6, fontSize: 13, fontWeight: 600, border: "1px solid #4a4a4a", cursor: "pointer" },
+  on: { background: "#3b5bdb", color: "#ffffff" },
+  off: { background: "#2a2a2a", color: "#ececec" },
+  card: { background: "#242424", border: "1px solid #333333", borderRadius: 10, overflow: "hidden" },
+  cellBorder: "1px solid #333333",
+};
+
+// Havoc rank and mutator names from a run's Havoc line ("Mutators: a, b").
+const havocInfo = (run) => {
+  if (!run.havoc) return { rank: null, mutators: [] };
+  const line = run.havoc.details.find(d => /^mutators:/i.test(d)) || "";
+  const mutators = line.replace(/^mutators:\s*/i, "").split(",").map(m => m.trim()).filter(Boolean);
+  return { rank: parseInt(run.havoc.rank, 10), mutators };
+};
+
 
 // Red-to-green colour for a stat's share of the run's best value.
 const getColorForRatio = (ratio) => {
@@ -47,6 +84,14 @@ function App() {
   const [loadoutSearch, setLoadoutSearch] = useState("");
   const [showRecords, setShowRecords] = useState(false);
   const [loadState, setLoadState] = useState("loading");
+  const [havocMode, setHavocMode] = useState("all");
+  const [minRank, setMinRank] = useState(0);
+  const [classFilter, setClassFilter] = useState("all");
+  const [mutatorFilter, setMutatorFilter] = useState([]);
+  const [mutatorPanelOpen, setMutatorPanelOpen] = useState(false);
+  const [mutatorQuery, setMutatorQuery] = useState("");
+  const [sortOrder, setSortOrder] = useState("newest");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
 
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Individual?key=${API_KEY}`;
@@ -56,10 +101,6 @@ function App() {
       .then(res => { setRows(res.data.values || []); setLoadState("ok"); })
       .catch(err => { console.error("Failed to load the Individual sheet:", err); setLoadState("error"); });
   }, [url]);
-
-  const toggleRun = (runKey) => {
-    setCollapsedRuns(prev => ({ ...prev, [runKey]: !prev[runKey] }));
-  };
 
   // Parse the Individual sheet's rows into runs, players, loadouts and stats.
   const runs = useMemo(() => {
@@ -170,49 +211,62 @@ function App() {
 }, [runs]);
 
 
-  // Runs for the selected player view, narrowed by the loadout search.
+  // Run-level options built from the data, so new classes and mutators appear automatically.
+  const runMeta = useMemo(() => runs.map(run => ({
+    ...havocInfo(run),
+    classes: Object.values(run.players).map(p => p.loadout[0]).filter(Boolean),
+  })), [runs]);
+
+  const classOptions = useMemo(() => [...new Set(runMeta.flatMap(m => m.classes))].sort(), [runMeta]);
+  const mutatorOptions = useMemo(() => [...new Set(runMeta.flatMap(m => m.mutators))].sort(), [runMeta]);
+
+  // Runs for the selected player view, narrowed by the filters and loadout search, then sorted.
   const filteredRuns = useMemo(() => {
     const search = loadoutSearch.toLowerCase();
+    const result = [];
 
-    let baseRuns;
-    if (selectedPlayer === "COMBINED") {
-      baseRuns = runs;
-    } else if (selectedPlayer === "Randoms") {
-      baseRuns = runs
-        .map(run => ({
-          ...run,
-          players: Object.fromEntries(
-            Object.entries(run.players).filter(([name]) => isRandom(name))
-          )
-        }))
-        .filter(run => Object.keys(run.players).length > 0);
-    } else {
-      baseRuns = runs
-        .map(run => {
-          const key = Object.keys(run.players).find(
-            k => k.toLowerCase() === selectedPlayer.toLowerCase()
-          );
-          return {
-            ...run,
-            players: key ? { [selectedPlayer]: run.players[key] } : {}
-          };
-        })
-        .filter(run => Object.keys(run.players).length > 0);
+    runs.forEach((run, i) => {
+      const meta = runMeta[i];
+      if (havocMode === "havoc" && meta.rank === null) return;
+      if (havocMode === "normal" && meta.rank !== null) return;
+      if (minRank > 0 && (meta.rank === null || meta.rank < minRank)) return;
+      if (classFilter !== "all" && !meta.classes.includes(classFilter)) return;
+      if (!mutatorFilter.every(m => meta.mutators.includes(m))) return;
+
+      let players;
+      if (selectedPlayer === "COMBINED") {
+        players = run.players;
+      } else if (selectedPlayer === "Randoms") {
+        players = Object.fromEntries(Object.entries(run.players).filter(([name]) => isRandom(name)));
+      } else {
+        const key = Object.keys(run.players).find(k => k.toLowerCase() === selectedPlayer.toLowerCase());
+        players = key ? { [selectedPlayer]: run.players[key] } : {};
+      }
+      if (search) {
+        players = Object.fromEntries(Object.entries(players).filter(([, data]) =>
+          data.loadout.some(item => item.toLowerCase().includes(search))));
+      }
+      if (Object.keys(players).length === 0) return;
+
+      result.push({ ...run, players, allPlayers: run.players, rank: meta.rank, mutators: meta.mutators });
+    });
+
+    if (sortOrder === "rank") {
+      result.sort((a, b) => (b.rank ?? -1) - (a.rank ?? -1));
     }
+    return result;
+  }, [runs, runMeta, selectedPlayer, loadoutSearch, havocMode, minRank, classFilter, mutatorFilter, sortOrder]);
 
-    if (!search) return baseRuns;
-    return baseRuns
-      .map(run => ({
-        ...run,
-        players: Object.fromEntries(
-          Object.entries(run.players).filter(([, data]) =>
-            data.loadout.some(item => item.toLowerCase().includes(search))
-          )
-        )
-      }))
-      .filter(run => Object.keys(run.players).length > 0);
-  }, [runs, selectedPlayer, loadoutSearch]);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); },
+    [selectedPlayer, loadoutSearch, havocMode, minRank, classFilter, mutatorFilter, sortOrder]);
 
+  const clearFilters = () => {
+    setHavocMode("all"); setMinRank(0); setClassFilter("all");
+    setMutatorFilter([]); setMutatorQuery(""); setSortOrder("newest"); setLoadoutSearch("");
+  };
+
+  const toggleMutator = (m) =>
+    setMutatorFilter(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]);
 
   // Each stat's highest value in a run, for colour coding.
   const computeMaxValues = (players) => {
@@ -225,31 +279,107 @@ function App() {
     return max;
   };
 
-  // A row of stat cells, optionally colour-coded.
+  // A row of stat cells, optionally colour-coded (used by the Records view).
   const CellRow = ({ items, maxValues, useColors = false }) => (
     <div className="row">
       {items.map((item, i) => {
         let backgroundColor = "#2a2a2a";
-        
         if (useColors && item.key && maxValues && maxValues[item.key]) {
-          const ratio = item.value / maxValues[item.key];
-          backgroundColor = getColorForRatio(ratio);
+          backgroundColor = getColorForRatio(item.value / maxValues[item.key]);
         }
-
-        const style = { backgroundColor, ...(item.style || {}) };
-
         return (
-          <div
-            key={i}
-            className="cell"
-            style={style}
-          >
+          <div key={i} className="cell" style={{ backgroundColor, ...(item.style || {}) }}>
             {item.label}
           </div>
         );
       })}
     </div>
   );
+
+  // One run as a table: players as columns, stats as rows, Havoc in the date bar.
+  const RunTable = ({ run, index }) => {
+    const maxValues = computeMaxValues(run.allPlayers);
+    const isCollapsed = collapsedRuns[run.date] ?? index >= EXPANDED_BY_DEFAULT;
+    const players = Object.entries(run.players);
+
+    return (
+      <section style={S.card} aria-label={`Run ${run.date}`}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px 16px", padding: "10px 14px", background: "#263b2e" }}>
+          <button type="button" aria-expanded={!isCollapsed}
+            onClick={() => setCollapsedRuns(prev => ({ ...prev, [run.date]: !isCollapsed }))}
+            style={{ minHeight: 36, padding: "0 6px", border: 0, background: "transparent", color: "#4ade80", fontSize: 17, fontWeight: 700, cursor: "pointer" }}>
+            {isCollapsed ? "▶" : "▼"} {run.date}
+          </button>
+          {run.rank !== null && (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <span style={{ padding: "4px 10px", borderRadius: 999, background: "#8f1d1d", color: "#ffffff", fontWeight: 700 }}>
+                Havoc Rank {run.rank}
+              </span>
+              <span style={{ color: "#d8d8d8" }}>{run.mutators.join(", ")}</span>
+            </div>
+          )}
+        </div>
+
+        {!isCollapsed && (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th scope="col" style={{ ...S.label, width: 180, padding: "10px 12px", textAlign: "left", verticalAlign: "bottom" }}>Player</th>
+                  {players.map(([name, data]) => (
+                    <th key={name} scope="col" style={{ padding: "10px 10px 8px", textAlign: "center", verticalAlign: "top", minWidth: 170, borderLeft: S.cellBorder }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "#6cb6ff", letterSpacing: "0.02em" }}>{name}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#e6e6e6", marginTop: 3 }}>
+                        {data.loadout.slice(0, 3).filter(Boolean).join(" · ")}
+                      </div>
+                      <div style={{ fontSize: 11, fontWeight: 400, color: "#a8a8a8", marginTop: 2, lineHeight: 1.35 }}>
+                        {data.loadout.slice(3, 7).filter(Boolean).join(" · ")}
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {STAT_SECTIONS.map(section => [
+                  <tr key={section.title}>
+                    <th scope="rowgroup" colSpan={players.length + 1}
+                      style={{ ...S.label, fontSize: 11, letterSpacing: "0.12em", padding: "9px 12px 4px", textAlign: "left", borderTop: S.cellBorder }}>
+                      {section.title}
+                    </th>
+                  </tr>,
+                  ...section.rows.map(([label, key]) => (
+                    <tr key={key}>
+                      <th scope="row" style={{ padding: "5px 12px", textAlign: "left", fontSize: 13, fontWeight: 500, color: "#d0d0d0", whiteSpace: "nowrap", borderTop: S.cellBorder }}>
+                        {label}
+                      </th>
+                      {players.map(([name, data]) => {
+                        const value = data.stats[key] || 0;
+                        const coloured = section.coloured && maxValues[key];
+                        return (
+                          <td key={name} style={{
+                            padding: "5px 10px", textAlign: "center", fontSize: 13, fontVariantNumeric: "tabular-nums",
+                            borderTop: S.cellBorder, borderLeft: S.cellBorder,
+                            ...(coloured
+                              ? { background: getColorForRatio(value / maxValues[key]), color: "#111111", fontWeight: 700 }
+                              : { color: "#ececec", fontWeight: 500 }),
+                          }}>
+                            {value.toLocaleString()}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  )),
+                ])}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    );
+  };
+
+  const mutatorList = mutatorOptions.filter(m => m.toLowerCase().includes(mutatorQuery.trim().toLowerCase()));
+  const shownRuns = filteredRuns.slice(0, visibleCount);
 
   return (
     <div className="page">
@@ -263,13 +393,6 @@ function App() {
             ))}
             <button onClick={() => setShowRecords(p => !p)}>Records</button>
           </div>
-          <input
-             type="text"
-             placeholder="Search loadout..."
-             value={loadoutSearch}
-             onChange={e => setLoadoutSearch(e.target.value)}
-             className="search-bar"
-          />
         </div>
 
         {loadState === "loading" && <div className="run"><div className="date">Loading reports…</div></div>}
@@ -301,69 +424,115 @@ function App() {
           </div>
         )}
 
-
-        {!showRecords && filteredRuns.map(run => {
-          const originalRun = runs.find(r => r.date === run.date);
-          const maxValues = computeMaxValues(originalRun ? originalRun.players : run.players);
-          const isCollapsed = collapsedRuns[run.date];
-
-          return (
-            <div key={run.date} className="run">
-              <div className="date" onClick={() => toggleRun(run.date)} style={{ cursor: "pointer", userSelect: "none"}}>
-                {isCollapsed ? "▶" : "▼"} {run.date}
-              </div>
-              {run.havoc?.rank && (
-                <div className="havoc" style={{
-                  backgroundColor: "#7f1d1d", color: "#fff", padding: "8px 12px",
-                  borderRadius: "6px", margin: "6px 0", textAlign: "center",
-                }}>
-                  <strong>Havoc Rank {run.havoc.rank}</strong>
-                  {run.havoc.details.map((line, i) => (
-                    <div key={i} style={{ fontSize: "0.85em", marginTop: "4px", opacity: 0.9 }}>
-                      {line}
-                    </div>
+        {!showRecords && loadState === "ok" && runs.length > 0 && (
+          <div style={{ maxWidth: 1120, margin: "0 auto", padding: "16px 16px 32px", display: "flex", flexDirection: "column", gap: 14, color: "#ececec" }}>
+            <section aria-label="Filters" style={{ ...S.card, overflow: "visible", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "12px 22px" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={S.label}>Loadout</span>
+                  <input type="search" placeholder="e.g. Relic Blade" value={loadoutSearch}
+                    onChange={e => setLoadoutSearch(e.target.value)} style={{ ...S.control, width: 200, padding: "0 10px" }} />
+                </label>
+                <div role="group" aria-label="Havoc" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ ...S.label, marginRight: 4 }}>Havoc</span>
+                  {[["all", "All runs"], ["havoc", "Havoc only"], ["normal", "Non-Havoc"]].map(([id, label]) => (
+                    <button key={id} type="button" aria-pressed={havocMode === id} onClick={() => setHavocMode(id)}
+                      style={{ ...S.button, ...(havocMode === id ? S.on : S.off) }}>{label}</button>
                   ))}
                 </div>
-              )}
-              {!isCollapsed && Object.entries(run.players).map(([name, data]) => (
-                <div key={name} className="report">
-                  <div className="player-name">{name}</div>
+                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={S.label}>Min rank</span>
+                  <select value={minRank} onChange={e => setMinRank(Number(e.target.value))} style={S.control}>
+                    <option value={0}>Any</option>
+                    {[10, 20, 30, 35].map(r => <option key={r} value={r}>{r}+</option>)}
+                  </select>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={S.label}>Class</span>
+                  <select value={classFilter} onChange={e => setClassFilter(e.target.value)} style={S.control}>
+                    <option value="all">Any</option>
+                    {classOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
+              </div>
 
-                  <CellRow items={data.loadout.map(l => ({ label: l }))} useColors={false} />
-
-                  <CellRow maxValues={maxValues} useColors={true} items={[
-                    { key:"melee_elites", label:`Melee Elites: ${data.stats.melee_elites||0}`, value:data.stats.melee_elites||0 },
-                    { key:"ranged_elites", label:`Ranged Elites: ${data.stats.ranged_elites||0}`, value:data.stats.ranged_elites||0 },
-                    { key:"melee_specials", label:`Melee Specials: ${data.stats.melee_specials||0}`, value:data.stats.melee_specials||0 },
-                    { key:"ranged_specials", label:`Ranged Specials: ${data.stats.ranged_specials||0}`, value:data.stats.ranged_specials||0 },
-                    { key:"horde_trash", label:`Melee Trash: ${data.stats.horde_trash||0}`, value:data.stats.horde_trash||0 },
-                    { key:"ranged_trash", label:`Ranged Trash: ${data.stats.ranged_trash||0}`, value:data.stats.ranged_trash||0 }
-                  ]} />
-
-                  <CellRow maxValues={maxValues} useColors={true} items={[
-                    { key:"boss_damage", label:`Boss Damage: ${(data.stats.boss_damage||0).toLocaleString()}`, value:data.stats.boss_damage||0 },
-                    { key:"elite_damage", label:`Elite Damage: ${(data.stats.elite_damage||0).toLocaleString()}`, value:data.stats.elite_damage||0 },
-                    { key:"special_damage", label:`Special Damage: ${(data.stats.special_damage||0).toLocaleString()}`, value:data.stats.special_damage||0 },
-                    { key:"trash_damage", label:`Trash Damage: ${(data.stats.trash_damage||0).toLocaleString()}`, value:data.stats.trash_damage||0 }
-                  ]} />
-
-                  <CellRow items={[
-                    { label:`Assists: ${data.stats.assists||0}` },
-                    { label:`Needed Help: ${data.stats.needed_help||0}` },
-                    { label:`Ammo Taken: ${data.stats.ammo_taken_||0}` }
-                  ]} useColors={false} />
-
-                  <CellRow items={[
-                    { label:`Blitz Uses: ${data.stats.blitz_uses||0}` },
-                    { label:`Combat Ability Uses: ${data.stats.combat_ability_uses||0}` },
-                    { label:`Damage Taken: ${data.stats.damage_taken||0}` }
-                  ]} useColors={false} />
-
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "12px 22px" }}>
+                <div style={{ position: "relative" }}>
+                  <button type="button" aria-expanded={mutatorPanelOpen} onClick={() => setMutatorPanelOpen(o => !o)}
+                    style={{ ...S.button, ...S.off }}>
+                    {mutatorFilter.length ? `Mutators (${mutatorFilter.length}) ▾` : "Mutators ▾"}
+                  </button>
+                  {mutatorPanelOpen && (
+                    <div style={{ position: "absolute", top: 42, left: 0, zIndex: 5, width: 300, padding: 10, background: "#2a2a2a",
+                      border: "1px solid #4a4a4a", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.45)", display: "flex", flexDirection: "column", gap: 8 }}>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#b8b8b8" }}>
+                        <span>Search mutators</span>
+                        <input type="search" value={mutatorQuery} onChange={e => setMutatorQuery(e.target.value)}
+                          placeholder="Type to filter" style={{ ...S.control, background: "#1f1f1f" }} />
+                      </label>
+                      <div style={{ maxHeight: 200, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+                        {mutatorList.map(m => (
+                          <label key={m} style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 36, padding: "0 4px", fontSize: 13, color: "#ececec" }}>
+                            <input type="checkbox" checked={mutatorFilter.includes(m)} onChange={() => toggleMutator(m)} style={{ width: 16, height: 16 }} />
+                            <span>{m}</span>
+                          </label>
+                        ))}
+                        {mutatorList.length === 0 && (
+                          <p style={{ margin: "6px 4px", fontSize: 13, color: "#9a9a9a" }}>
+                            {mutatorOptions.length ? "No mutators match." : "No Havoc runs yet."}
+                          </p>
+                        )}
+                      </div>
+                      <button type="button" onClick={() => setMutatorPanelOpen(false)}
+                        style={{ ...S.button, ...S.on, borderColor: "#3b5bdb" }}>Done</button>
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
-          );
-        })}
+                {mutatorFilter.map(m => (
+                  <span key={m} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 4px 2px 12px", borderRadius: 999,
+                    background: "#3b5bdb", color: "#ffffff", fontSize: 12, fontWeight: 600 }}>
+                    {m}
+                    <button type="button" aria-label={`Remove ${m}`} onClick={() => toggleMutator(m)}
+                      style={{ width: 28, height: 28, border: 0, borderRadius: 999, background: "transparent", color: "#ffffff", fontSize: 16, lineHeight: 1, cursor: "pointer" }}>×</button>
+                  </span>
+                ))}
+                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={S.label}>Sort</span>
+                  <select value={sortOrder} onChange={e => setSortOrder(e.target.value)} style={S.control}>
+                    <option value="newest">Newest first</option>
+                    <option value="rank">Highest Havoc rank</option>
+                  </select>
+                </label>
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 13, color: "#b8b8b8" }}>
+                <span>{filteredRuns.length} of {runs.length} runs match</span>
+                <button type="button" onClick={clearFilters}
+                  style={{ minHeight: 32, padding: "0 12px", border: "1px solid #4a4a4a", borderRadius: 6, background: "transparent", color: "#ececec", fontSize: 13, cursor: "pointer" }}>
+                  Clear filters
+                </button>
+              </div>
+            </section>
+
+            {shownRuns.map((run, i) => <RunTable key={run.date} run={run} index={i} />)}
+
+            {filteredRuns.length === 0 && (
+              <p style={{ ...S.card, margin: 0, padding: 18, textAlign: "center", fontSize: 14, color: "#b8b8b8" }}>
+                No runs match these filters.
+              </p>
+            )}
+            {filteredRuns.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: "6px 0" }}>
+                <span style={{ fontSize: 13, color: "#9a9a9a" }}>Showing {shownRuns.length} of {filteredRuns.length}</span>
+                {filteredRuns.length > visibleCount && (
+                  <button type="button" onClick={() => setVisibleCount(c => c + PAGE_SIZE)} style={{ ...S.button, ...S.off }}>
+                    Show {PAGE_SIZE} more
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
