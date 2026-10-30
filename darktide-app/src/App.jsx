@@ -1,12 +1,10 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import "./App.css";
-import axios from "axios";
 
-const SHEET_ID = import.meta.env.VITE_SHEET_ID;
-const API_KEY  = import.meta.env.VITE_API_KEY;
+const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
 
 // The four permanent players; anyone else is a random. Names are matched
-// case-insensitively because the sheet writes them in uppercase.
+// case-insensitively.
 const KNOWN_PLAYERS = ['Steven', 'Lee', 'Injea', 'Blitter'];
 const isKnown  = (name) => KNOWN_PLAYERS.some(k => k.toLowerCase() === name.toLowerCase());
 const isRandom = (name) => !isKnown(name);
@@ -16,19 +14,21 @@ const EXPANDED_BY_DEFAULT = 3;
 
 const STAT_SECTIONS = [
   { title: "Kills", coloured: true, rows: [
-    ["Melee Elites", "melee_elites"], ["Ranged Elites", "ranged_elites"],
-    ["Melee Specials", "melee_specials"], ["Ranged Specials", "ranged_specials"],
-    ["Melee Trash", "horde_trash"], ["Ranged Trash", "ranged_trash"],
+    ["Melee Elites", "melee_elite_kills"], ["Ranged Elites", "ranged_elite_kills"],
+    ["Melee Specials", "melee_special_kills"], ["Ranged Specials", "ranged_special_kills"],
+    ["Melee Trash", "horde_trash_kills"], ["Ranged Trash", "ranged_trash_kills"],
   ]},
   { title: "Damage", coloured: true, rows: [
     ["Boss Damage", "boss_damage"], ["Elite Damage", "elite_damage"],
-    ["Special Damage", "special_damage"], ["Trash Damage", "trash_damage"],
+    ["Special Damage", "specialist_damage"], ["Trash Damage", "horde_damage"],
   ]},
   { title: "Support", coloured: false, rows: [
-    ["Assists", "assists"], ["Needed Help", "needed_help"], ["Ammo Taken", "ammo_taken_"],
+    ["Assists", "revives_done"], ["Needed Help", "needed_revives"], ["Ammo Taken", "ammo_used"],
     ["Blitz Uses", "blitz_uses"], ["Combat Ability Uses", "combat_ability_uses"], ["Damage Taken", "damage_taken"],
   ]},
 ];
+
+const STAT_LABELS = Object.fromEntries(STAT_SECTIONS.flatMap(s => s.rows.map(([label, key]) => [key, label])));
 
 const S = {
   label: { fontSize: 12, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#9a9a9a" },
@@ -40,13 +40,68 @@ const S = {
   cellBorder: "1px solid #333333",
 };
 
-// Havoc rank and mutator names from a run's Havoc line ("Mutators: a, b").
-const havocInfo = (run) => {
-  if (!run.havoc) return { rank: null, mutators: [] };
-  const line = run.havoc.details.find(d => /^mutators:/i.test(d)) || "";
-  const mutators = line.replace(/^mutators:\s*/i, "").split(",").map(m => m.trim()).filter(Boolean);
-  return { rank: parseInt(run.havoc.rank, 10), mutators };
+// Havoc rank and mutator names for a run (rank null for non-Havoc runs).
+const havocInfo = (run) => run.havoc
+  ? { rank: run.havoc.rank, mutators: run.havoc.mutators || [] }
+  : { rank: null, mutators: [] };
+
+// "MM/DD/YY HH:MM:SS" from the API's "YYYY-MM-DDTHH:MM:SS" run key.
+const displayDate = (key) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}:\d{2})$/.exec(key || "");
+  return m ? `${m[2]}/${m[3]}/${m[1].slice(2)} ${m[4]}` : key;
 };
+
+// The API's runs in the shape the views use: players keyed by name.
+const toRuns = (apiRuns) => apiRuns.map(r => ({
+  key: r.key,
+  date: displayDate(r.key),
+  outcome: r.outcome,
+  havoc: r.havoc,
+  players: Object.fromEntries(r.players.map(p => [p.player, { loadout: p.loadout, stats: p.stats }])),
+}));
+
+// Keeps a WebSocket to the API open and calls onUpdate when new runs are saved
+// (and after reconnecting, in case an update was missed). Returns the status.
+function useLiveUpdates(onUpdate) {
+  const [status, setStatus] = useState("connecting");
+  const callback = useRef(onUpdate);
+  callback.current = onUpdate;
+
+  useEffect(() => {
+    if (!API_URL) return undefined;
+    let socket, pingTimer, retryTimer, stopped = false, attempts = 0;
+
+    const connect = () => {
+      socket = new WebSocket(API_URL.replace(/^http/, "ws") + "/api/live");
+      socket.onopen = () => {
+        if (attempts > 0) callback.current();
+        attempts = 0;
+        setStatus("live");
+        pingTimer = setInterval(() => socket.readyState === 1 && socket.send("ping"), 30000);
+      };
+      socket.onmessage = (e) => {
+        try { if (JSON.parse(e.data).type === "runs_updated") callback.current(); } catch (_) {}
+      };
+      socket.onclose = () => {
+        clearInterval(pingTimer);
+        if (stopped) return;
+        setStatus("reconnecting");
+        attempts++;
+        retryTimer = setTimeout(connect, Math.min(30000, 1000 * 2 ** attempts));
+      };
+    };
+    connect();
+
+    return () => {
+      stopped = true;
+      clearInterval(pingTimer);
+      clearTimeout(retryTimer);
+      if (socket) socket.close();
+    };
+  }, []);
+
+  return status;
+}
 
 
 // Red-to-green colour for a stat's share of the run's best value.
@@ -78,7 +133,7 @@ const getColorForRatio = (ratio) => {
 };
 
 function App() {
-  const [rows, setRows] = useState([]);
+  const [runs, setRuns] = useState([]);
   const [selectedPlayer, setSelectedPlayer] = useState("COMBINED");
   const [collapsedRuns, setCollapsedRuns] = useState({});
   const [loadoutSearch, setLoadoutSearch] = useState("");
@@ -94,83 +149,20 @@ function App() {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
 
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/Individual?key=${API_KEY}`;
+  // Load every run from the API; keeps the current runs if a refresh fails.
+  const loadRuns = useCallback(() => {
+    if (!API_URL) { setLoadState("error"); return; }
+    fetch(`${API_URL}/api/runs`)
+      .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+      .then(data => { setRuns(toRuns(data.runs || [])); setLoadState("ok"); })
+      .catch(err => {
+        console.error("Failed to load runs:", err);
+        setLoadState(prev => (prev === "ok" ? "ok" : "error"));
+      });
+  }, []);
 
-  useEffect(() => {
-    axios.get(url)
-      .then(res => { setRows(res.data.values || []); setLoadState("ok"); })
-      .catch(err => { console.error("Failed to load the Individual sheet:", err); setLoadState("error"); });
-  }, [url]);
-
-  // Parse the Individual sheet's rows into runs, players, loadouts and stats.
-  const runs = useMemo(() => {
-    const parsed = [];
-    let currentRun = null;
-    let currentPlayer = null;
-    let expectLoadout = false;
-
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      if (!row || row.length === 0) continue;
-
-      const firstCell = (row[0] || "").trim();
-      
-      if (firstCell.startsWith("▶")) {
-        currentRun = { date: firstCell.replace("▶", "").trim(), players: {}, havoc: null };
-        currentPlayer = null;
-        expectLoadout = false;
-        parsed.push(currentRun);
-        continue;
-      }
-
-      if (/^HAVOC RANK/i.test(firstCell)) {
-        const rank = firstCell.replace(/^HAVOC RANK\s*/i, "").trim();
-        if (currentRun && rank) {
-          currentRun.havoc = {
-            rank,
-            details: (row[1] || "").split("|").map(d => d.trim()).filter(Boolean),
-          };
-        }
-        continue;
-      }
-
-      if (firstCell.startsWith("👤")) {
-        currentPlayer = firstCell.replace("👤", "").trim();
-        if (currentRun) {
-          currentRun.players[currentPlayer] = { loadout: [], stats: {} };
-        }
-        continue;
-      }
-
-      if (!currentRun || !currentPlayer) continue;
-
-      const playerData = currentRun.players[currentPlayer];
-      const rowText = row.join(" ").toLowerCase();
-
-      if (rowText.startsWith("class melee ranged")) {
-        expectLoadout = true;
-        continue;
-      }
-      if (expectLoadout) {
-        playerData.loadout = Array.from({ length: 7 }, (_, k) => (row[k] || "").trim());
-        expectLoadout = false;
-        continue;
-      }
-      if (rowText.includes("kills damage") || rowText.includes("additional stats")) continue;
-
-      for (let j = 0; j < row.length - 1; j++) {
-        const label = (row[j] || "").trim();
-        const valueStr = (row[j + 1] || "").trim();
-        if (label && /^[\d,]+$/.test(valueStr)) {
-          const key = label.toLowerCase().replace(/\s+/g, "_").replace(/[()%]/g, "");
-          playerData.stats[key] = parseInt(valueStr.replace(/,/g, ""), 10);
-          j++;
-        }
-      }
-    }
-
-    return parsed;
-  }, [rows]);
+  useEffect(() => { loadRuns(); }, [loadRuns]);
+  const liveStatus = useLiveUpdates(loadRuns);
 
   // Player buttons: the known players present, plus one Randoms button if needed.
   const allPlayers = useMemo(() => {
@@ -184,12 +176,7 @@ function App() {
 
   // All-time best value for each stat.
   const records = useMemo(() => {
-  const statKeys = [
-    "melee_elites", "ranged_elites", "melee_specials", "ranged_specials",
-    "horde_trash", "ranged_trash", "boss_damage", "elite_damage",
-    "special_damage", "trash_damage", "assists", "needed_help",
-    "ammo_taken_", "blitz_uses", "combat_ability_uses", "damage_taken"
-  ];
+  const statKeys = Object.keys(STAT_LABELS);
 
   const records = {};
   runs.forEach(run => {
@@ -299,14 +286,14 @@ function App() {
   // One run as a table: players as columns, stats as rows, Havoc in the date bar.
   const RunTable = ({ run, index }) => {
     const maxValues = computeMaxValues(run.allPlayers);
-    const isCollapsed = collapsedRuns[run.date] ?? index >= EXPANDED_BY_DEFAULT;
+    const isCollapsed = collapsedRuns[run.key] ?? index >= EXPANDED_BY_DEFAULT;
     const players = Object.entries(run.players);
 
     return (
       <section style={S.card} aria-label={`Run ${run.date}`}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px 16px", padding: "10px 14px", background: "#263b2e" }}>
           <button type="button" aria-expanded={!isCollapsed}
-            onClick={() => setCollapsedRuns(prev => ({ ...prev, [run.date]: !isCollapsed }))}
+            onClick={() => setCollapsedRuns(prev => ({ ...prev, [run.key]: !isCollapsed }))}
             style={{ minHeight: 36, padding: "0 6px", border: 0, background: "transparent", color: "#4ade80", fontSize: 17, fontWeight: 700, cursor: "pointer" }}>
             {isCollapsed ? "▶" : "▼"} {run.date}
           </button>
@@ -386,6 +373,9 @@ function App() {
       <div className="app">
         <div className="header">
           <h1>Darktide Stats</h1>
+          <span role="status" style={{ fontSize: 12, color: liveStatus === "live" ? "#4ade80" : "#9a9a9a" }}>
+            {liveStatus === "live" ? "● Live" : liveStatus === "reconnecting" ? "○ Reconnecting…" : "○ Connecting…"}
+          </span>
           <div className="buttons">
             <button onClick={() => {setSelectedPlayer("COMBINED"); setShowRecords(false);}}>Combined</button>
             {allPlayers.map(p => (
@@ -401,7 +391,7 @@ function App() {
         )}
         {loadState === "ok" && runs.length === 0 && (
           <div className="run">
-            <div className="date">No reports found. If a mission was just uploaded, the sheet may still be rebuilding — reload in a few seconds.</div>
+            <div className="date">No runs uploaded yet. New uploads appear here automatically.</div>
           </div>
         )}
 
@@ -411,7 +401,7 @@ function App() {
             {Object.entries(records).map(([key, rec]) => (
              <div key={key} className="report">
                 <div className="player-name">
-                  {key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())}
+                  {STAT_LABELS[key] || key}
                 </div>
                 <CellRow items={rec.loadout.map(l => ({ label: l }))} useColors={false} />
                 <CellRow useColors={false} items={[
@@ -514,7 +504,7 @@ function App() {
               </div>
             </section>
 
-            {shownRuns.map((run, i) => <RunTable key={run.date} run={run} index={i} />)}
+            {shownRuns.map((run, i) => <RunTable key={run.key} run={run} index={i} />)}
 
             {filteredRuns.length === 0 && (
               <p style={{ ...S.card, margin: 0, padding: 18, textAlign: "center", fontSize: 14, color: "#b8b8b8" }}>
