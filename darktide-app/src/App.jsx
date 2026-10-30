@@ -162,7 +162,7 @@ function App() {
   }, []);
 
   useEffect(() => { loadRuns(); }, [loadRuns]);
-  const liveStatus = useLiveUpdates(loadRuns);
+  useLiveUpdates(loadRuns);
 
   // Player buttons: the known players present, plus one Randoms button if needed.
   const allPlayers = useMemo(() => {
@@ -373,9 +373,6 @@ function App() {
       <div className="app">
         <div className="header">
           <h1>Darktide Stats</h1>
-          <span role="status" style={{ fontSize: 12, color: liveStatus === "live" ? "#4ade80" : "#9a9a9a" }}>
-            {liveStatus === "live" ? "● Live" : liveStatus === "reconnecting" ? "○ Reconnecting…" : "○ Connecting…"}
-          </span>
           <div className="buttons">
             <button onClick={() => {setSelectedPlayer("COMBINED"); setShowRecords(false);}}>Combined</button>
             {allPlayers.map(p => (
