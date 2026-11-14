@@ -372,7 +372,7 @@ function App() {
     <div className="page">
       <div className="app">
         <div className="header">
-          <h1>Darktide Stats I EDITED THIS CAN YOU GUYS TELL?</h1>
+          <h1>Darktide Stats</h1>
           <div className="buttons">
             <button onClick={() => {setSelectedPlayer("COMBINED"); setShowRecords(false);}}>Combined</button>
             {allPlayers.map(p => (
