@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef, memo } from "react";
 import "./App.css";
 
 const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
@@ -255,115 +255,9 @@ function App() {
   const toggleMutator = (m) =>
     setMutatorFilter(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]);
 
-  // Each stat's highest value in a run, for colour coding.
-  const computeMaxValues = (players) => {
-    const max = {};
-    Object.values(players).forEach(p => {
-      Object.entries(p.stats).forEach(([k, v]) => {
-        max[k] = Math.max(max[k] || 0, v);
-      });
-    });
-    return max;
-  };
-
-  // A row of stat cells, optionally colour-coded (used by the Records view).
-  const CellRow = ({ items, maxValues, useColors = false }) => (
-    <div className="row">
-      {items.map((item, i) => {
-        let backgroundColor = "#2a2a2a";
-        if (useColors && item.key && maxValues && maxValues[item.key]) {
-          backgroundColor = getColorForRatio(item.value / maxValues[item.key]);
-        }
-        return (
-          <div key={i} className="cell" style={{ backgroundColor, ...(item.style || {}) }}>
-            {item.label}
-          </div>
-        );
-      })}
-    </div>
-  );
-
-  // One run as a table: players as columns, stats as rows, Havoc in the date bar.
-  const RunTable = ({ run, index }) => {
-    const maxValues = computeMaxValues(run.allPlayers);
-    const isCollapsed = collapsedRuns[run.key] ?? index >= EXPANDED_BY_DEFAULT;
-    const players = Object.entries(run.players);
-
-    return (
-      <section style={S.card} aria-label={`Run ${run.date}`}>
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px 16px", padding: "10px 14px", background: "#263b2e" }}>
-          <button type="button" aria-expanded={!isCollapsed}
-            onClick={() => setCollapsedRuns(prev => ({ ...prev, [run.key]: !isCollapsed }))}
-            style={{ minHeight: 36, padding: "0 6px", border: 0, background: "transparent", color: "#4ade80", fontSize: 17, fontWeight: 700, cursor: "pointer" }}>
-            {isCollapsed ? "▶" : "▼"} {run.date}
-          </button>
-          {run.rank !== null && (
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, fontSize: 13 }}>
-              <span style={{ padding: "4px 10px", borderRadius: 999, background: "#8f1d1d", color: "#ffffff", fontWeight: 700 }}>
-                Havoc Rank {run.rank}
-              </span>
-              <span style={{ color: "#d8d8d8" }}>{run.mutators.join(", ")}</span>
-            </div>
-          )}
-        </div>
-
-        {!isCollapsed && (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  <th scope="col" style={{ ...S.label, width: 180, padding: "10px 12px", textAlign: "left", verticalAlign: "bottom" }}>Player</th>
-                  {players.map(([name, data]) => (
-                    <th key={name} scope="col" style={{ padding: "10px 10px 8px", textAlign: "center", verticalAlign: "top", minWidth: 170, borderLeft: S.cellBorder }}>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: "#6cb6ff", letterSpacing: "0.02em" }}>{name}</div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#e6e6e6", marginTop: 3 }}>
-                        {data.loadout.slice(0, 3).filter(Boolean).join(" · ")}
-                      </div>
-                      <div style={{ fontSize: 11, fontWeight: 400, color: "#a8a8a8", marginTop: 2, lineHeight: 1.35 }}>
-                        {data.loadout.slice(3, 7).filter(Boolean).join(" · ")}
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {STAT_SECTIONS.map(section => [
-                  <tr key={section.title}>
-                    <th scope="rowgroup" colSpan={players.length + 1}
-                      style={{ ...S.label, fontSize: 11, letterSpacing: "0.12em", padding: "9px 12px 4px", textAlign: "left", borderTop: S.cellBorder }}>
-                      {section.title}
-                    </th>
-                  </tr>,
-                  ...section.rows.map(([label, key]) => (
-                    <tr key={key}>
-                      <th scope="row" style={{ padding: "5px 12px", textAlign: "left", fontSize: 13, fontWeight: 500, color: "#d0d0d0", whiteSpace: "nowrap", borderTop: S.cellBorder }}>
-                        {label}
-                      </th>
-                      {players.map(([name, data]) => {
-                        const value = data.stats[key] || 0;
-                        const coloured = section.coloured && maxValues[key];
-                        return (
-                          <td key={name} style={{
-                            padding: "5px 10px", textAlign: "center", fontSize: 13, fontVariantNumeric: "tabular-nums",
-                            borderTop: S.cellBorder, borderLeft: S.cellBorder,
-                            ...(coloured
-                              ? { background: getColorForRatio(value / maxValues[key]), color: "#111111", fontWeight: 700 }
-                              : { color: "#ececec", fontWeight: 500 }),
-                          }}>
-                            {value.toLocaleString()}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  )),
-                ])}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-    );
-  };
+  // Opens or closes one run. Stable across renders so unchanged runs skip re-rendering.
+  const toggleRun = useCallback((key, isCollapsed) =>
+    setCollapsedRuns(prev => ({ ...prev, [key]: !isCollapsed })), []);
 
   const mutatorList = mutatorOptions.filter(m => m.toLowerCase().includes(mutatorQuery.trim().toLowerCase()));
   const shownRuns = filteredRuns.slice(0, visibleCount);
@@ -501,7 +395,11 @@ function App() {
               </div>
             </section>
 
-            {shownRuns.map((run, i) => <RunTable key={run.key} run={run} index={i} />)}
+            {shownRuns.map((run, i) => (
+              <RunTable key={run.key} run={run}
+                isCollapsed={collapsedRuns[run.key] ?? i >= EXPANDED_BY_DEFAULT}
+                onToggle={toggleRun} />
+            ))}
 
             {filteredRuns.length === 0 && (
               <p style={{ ...S.card, margin: 0, padding: 18, textAlign: "center", fontSize: 14, color: "#b8b8b8" }}>
@@ -524,5 +422,119 @@ function App() {
     </div>
   );
 }
+
+// Each stat's highest value in a run, for colour coding.
+const computeMaxValues = (players) => {
+  const max = {};
+  Object.values(players).forEach(p => {
+    Object.entries(p.stats).forEach(([k, v]) => {
+      max[k] = Math.max(max[k] || 0, v);
+    });
+  });
+  return max;
+};
+
+// A row of stat cells, optionally colour-coded (used by the Records view).
+// Defined outside App so React keeps its DOM between renders.
+function CellRow({ items, maxValues, useColors = false }) {
+  return (
+    <div className="row">
+      {items.map((item, i) => {
+        let backgroundColor = "#2a2a2a";
+        if (useColors && item.key && maxValues && maxValues[item.key]) {
+          backgroundColor = getColorForRatio(item.value / maxValues[item.key]);
+        }
+        return (
+          <div key={i} className="cell" style={{ backgroundColor, ...(item.style || {}) }}>
+            {item.label}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// One run as a table: players as columns, stats as rows, Havoc in the date bar.
+// Defined outside App so opening or closing a run updates it in place instead of
+// rebuilding every run on the page (which reset the scroll position).
+const RunTable = memo(function RunTable({ run, isCollapsed, onToggle }) {
+    const maxValues = computeMaxValues(run.allPlayers);
+    const players = Object.entries(run.players);
+
+    return (
+      <section style={S.card} aria-label={`Run ${run.date}`}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px 16px", padding: "10px 14px", background: "#263b2e" }}>
+          <button type="button" aria-expanded={!isCollapsed}
+            onClick={() => onToggle(run.key, isCollapsed)}
+            style={{ minHeight: 36, padding: "0 6px", border: 0, background: "transparent", color: "#4ade80", fontSize: 17, fontWeight: 700, cursor: "pointer" }}>
+            {isCollapsed ? "▶" : "▼"} {run.date}
+          </button>
+          {run.rank !== null && (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <span style={{ padding: "4px 10px", borderRadius: 999, background: "#8f1d1d", color: "#ffffff", fontWeight: 700 }}>
+                Havoc Rank {run.rank}
+              </span>
+              <span style={{ color: "#d8d8d8" }}>{run.mutators.join(", ")}</span>
+            </div>
+          )}
+        </div>
+
+        {!isCollapsed && (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th scope="col" style={{ ...S.label, width: 180, padding: "10px 12px", textAlign: "left", verticalAlign: "bottom" }}>Player</th>
+                  {players.map(([name, data]) => (
+                    <th key={name} scope="col" style={{ padding: "10px 10px 8px", textAlign: "center", verticalAlign: "top", minWidth: 170, borderLeft: S.cellBorder }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "#6cb6ff", letterSpacing: "0.02em" }}>{name}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#e6e6e6", marginTop: 3 }}>
+                        {data.loadout.slice(0, 3).filter(Boolean).join(" · ")}
+                      </div>
+                      <div style={{ fontSize: 11, fontWeight: 400, color: "#a8a8a8", marginTop: 2, lineHeight: 1.35 }}>
+                        {data.loadout.slice(3, 7).filter(Boolean).join(" · ")}
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {STAT_SECTIONS.map(section => [
+                  <tr key={section.title}>
+                    <th scope="rowgroup" colSpan={players.length + 1}
+                      style={{ ...S.label, fontSize: 11, letterSpacing: "0.12em", padding: "9px 12px 4px", textAlign: "left", borderTop: S.cellBorder }}>
+                      {section.title}
+                    </th>
+                  </tr>,
+                  ...section.rows.map(([label, key]) => (
+                    <tr key={key}>
+                      <th scope="row" style={{ padding: "5px 12px", textAlign: "left", fontSize: 13, fontWeight: 500, color: "#d0d0d0", whiteSpace: "nowrap", borderTop: S.cellBorder }}>
+                        {label}
+                      </th>
+                      {players.map(([name, data]) => {
+                        const value = data.stats[key] || 0;
+                        const coloured = section.coloured && maxValues[key];
+                        return (
+                          <td key={name} style={{
+                            padding: "5px 10px", textAlign: "center", fontSize: 13, fontVariantNumeric: "tabular-nums",
+                            borderTop: S.cellBorder, borderLeft: S.cellBorder,
+                            ...(coloured
+                              ? { background: getColorForRatio(value / maxValues[key]), color: "#111111", fontWeight: 700 }
+                              : { color: "#ececec", fontWeight: 500 }),
+                          }}>
+                            {value.toLocaleString()}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  )),
+                ])}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    );
+});
 
 export default App;
