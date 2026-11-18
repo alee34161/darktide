@@ -14,6 +14,8 @@ const MAX_PLAYERS = 8;
 const MAX_RUNS_PER_UPLOAD = 50;
 const MAX_TEXT = 200;
 const MAX_SOCKETS = 200;
+// Live connections one network may hold, so a single client can't take every slot.
+const MAX_SOCKETS_PER_CLIENT = 10;
 
 // ── Live updates ────────────────────────────────────────────────────────────
 // One shared object holds every open webapp socket. It uses WebSocket
@@ -33,8 +35,12 @@ export class LiveHub extends DurableObject {
       if (this.ctx.getWebSockets().length >= MAX_SOCKETS) {
         return new Response("Too many live connections", { status: 503 });
       }
+      const tag = clientTag(request);
+      if (this.ctx.getWebSockets(tag).length >= MAX_SOCKETS_PER_CLIENT) {
+        return new Response("Too many live connections from this address", { status: 429 });
+      }
       const [client, server] = Object.values(new WebSocketPair());
-      this.ctx.acceptWebSocket(server);
+      this.ctx.acceptWebSocket(server, [tag]);
       return new Response(null, { status: 101, webSocket: client });
     }
     if (url.pathname === "/broadcast" && request.method === "POST") {
@@ -55,6 +61,19 @@ export class LiveHub extends DurableObject {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+// Tag identifying the connecting network: the IPv4 address, or the /64 prefix
+// for IPv6 (one home or phone gets a whole /64, so single addresses are free to rotate).
+function clientTag(request) {
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  if (!ip.includes(":")) return `ip:${ip}`;
+  const [head, tail = ""] = ip.split("::");
+  const groups = head.split(":").filter(Boolean);
+  const tailGroups = tail.split(":").filter(Boolean);
+  const missing = 8 - groups.length - tailGroups.length;
+  const full = [...groups, ...Array(Math.max(0, missing)).fill("0"), ...tailGroups];
+  return `ip6:${full.slice(0, 4).map(g => g.toLowerCase()).join(":")}`;
+}
 
 function allowedOrigins(env) {
   return String(env.ALLOWED_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -187,9 +206,10 @@ async function listRuns(db) {
     }
     const stats = {};
     for (const f of STAT_FIELDS) stats[f] = row[f];
+    // in_game_name stays in the database but is not published: the webapp never
+    // shows it, and for randoms it identifies strangers.
     run.players.push({
       player: row.player,
-      in_game_name: row.in_game_name,
       is_known: !!row.is_known,
       loadout: LOADOUT_FIELDS.map(f => row[f] || ""),
       stats,
